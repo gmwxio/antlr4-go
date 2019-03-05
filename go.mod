@@ -1,1 +1,1 @@
-module github.com/wxio/antlr4-go
+module github.com/wxio/antlr4
