@@ -28,6 +28,8 @@ type ParserRuleContext interface {
 
 	AddChild(child RuleContext) RuleContext
 	RemoveLastChild()
+
+	VisitChildrenFunc(nv NodeVisitor, h ParserTreeVisitorHandlers, args ...interface{})
 }
 
 type BaseParserRuleContext struct {
@@ -62,6 +64,27 @@ func NewBaseParserRuleContext(parent ParserRuleContext, invokingStateNumber int)
 
 func (prc *BaseParserRuleContext) SetException(e RecognitionException) {
 	prc.exception = e
+}
+
+func (prc *BaseParserRuleContext) VisitFunc(nv NodeVisitor, p ParserTreeVisitorHandlers, args ...interface{}) interface{} {
+	return nil
+}
+
+func (prc *BaseParserRuleContext) VisitChildrenFunc(nv NodeVisitor, h ParserTreeVisitorHandlers, args ...interface{}) {
+	for _, child := range prc.GetChildren() {
+		switch child := child.(type) {
+		case TerminalNode:
+			if nv != nil {
+				nv.VisitTerminal(child)
+			}
+		case ErrorNode:
+			if nv != nil {
+				nv.VisitErrorNode(child)
+			}
+		case RuleNode:
+			child.VisitFunc(nv, h, args...)
+		}
+	}
 }
 
 func (prc *BaseParserRuleContext) GetChildren() []Tree {
@@ -182,8 +205,7 @@ func (prc *BaseParserRuleContext) GetRuleContext() RuleContext {
 }
 
 func (prc *BaseParserRuleContext) Visit(delegate ParseTreeVisitor, args ...interface{}) (result interface{}) {
-	delegate.VisitChildren(prc, delegate)
-	return
+	return delegate.VisitChildren(prc, delegate)
 }
 
 func (prc *BaseParserRuleContext) SetStart(t Token) {

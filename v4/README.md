@@ -31,3 +31,31 @@ Go runtime package for Antlr4. Also contains Antlr4 jar file and examples.
 
 This is simply a split of the Go runtime from the main github repository.
 See https://help.github.com/articles/splitting-a-subfolder-out-into-a-new-repository/ regarding split a repo
+
+## Building Antlr4
+
+```
+# install maven
+sudo apt install maven
+# choose appropriate java version (worked with jdk 1.8)
+sudo update-alternatives --config java
+
+git clone git@github.com:wxio/antlr4.git
+cd antlr4
+# change snapshot version
+# todo something like find . -name "pom.xml" | xargs -i sed -e 's!4.7.3-SNAPSHOT!4.7.4-SNAPSHOT!' {}
+mvn install -DskipTests
+
+# in antlr4-go
+cd ../antlr4-go/v4
+rm lib/wxio/*
+cp ../../antlr4/tool/target/antlr4-4.7.3-SNAPSHOT* lib/wxio/
+
+# probably working from antlr4-go directory so copy go back to antlr4 dir
+cp * ../../antlr4/runtime/Go/antlr/
+# if it was the other way
+#cp ../../antlr4/runtime/Go/antlr/* ./
+
+
+# git tag and push
+```

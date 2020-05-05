@@ -17,6 +17,8 @@ type Tree interface {
 	GetChild(i int) Tree
 	GetChildCount() int
 	GetChildren() []Tree
+
+	VisitFunc(nv NodeVisitor, tv ParserTreeVisitorHandlers, args ...interface{}) interface{}
 }
 
 type SyntaxTree interface {
@@ -53,55 +55,105 @@ type ErrorNode interface {
 	errorNode()
 }
 
+type ParserTreeVisitorHandlers interface {
+}
+
 type ParseTreeVisitor interface {
-	VisitNext(next Tree, currentResult interface{}) bool
-	VisitRest(next RuleNode, currentResult interface{}) bool
-	VisitTerminal(node TerminalNode, args ...interface{}) (result interface{})
-	VisitErrorNode(node ErrorNode, args ...interface{}) (result interface{})
+	VisitTerminal(node TerminalNode)
+	VisitErrorNode(node ErrorNode)
 	VisitChildren(node RuleNode, delegate ParseTreeVisitor, args ...interface{}) (result interface{})
+}
+type NodeVisitor interface {
+	TerminalVisitor
+	ErrorNodeVisitor
+}
+type TerminalVisitor interface {
+	VisitTerminal(node TerminalNode)
+}
+type ErrorNodeVisitor interface {
+	VisitErrorNode(node ErrorNode)
+}
+type AggregateResultVisitor interface {
 	AggregateResult(aggregate, nextResult interface{}) (result interface{})
 }
+type VisitNextCheck interface {
+	VisitNext(next Tree, currentResult interface{}) bool
+}
+type VisitRestCheck interface {
+	VisitRest(next RuleNode, currentResult interface{}) bool
+}
+type EnterEveryRuleVisitor interface {
+	EnterEveryRule(ctx RuleNode)
+}
+type ExitEveryRuleVisitor interface {
+	ExitEveryRule(ctx RuleNode)
+}
+
+// grammar Example;
+// a : b ;
+// b : 'c' # Y;
+
+// in somefile.go
+//go:generate java -jar path/antlr.har -o parser -package parser -visitor Example.g4
+
+// -- generate example_visitor.go
+// type AContextVisitor interface {
+// 	VisitA(ctx IAContext, delegate antlr.ParseTreeVisitor, args ...interface{}) (result interface{})
+// }
+// type YContextVisitor interface {
+// 	VisitY(ctx IYContext, delegate antlr.ParseTreeVisitor, args ...interface{}) (result interface{})
+// }
+
+// -- implemented visitor
+// func (v *MyV) VisitA(ctx parser.IAContext, delegate antlr.ParseTreeVisitor, args ...interface{}) (result interface{}) {
+// 	return
+// }
+// func (v *MyV) VisitY(ctx parser.IYContext, delegate antlr.ParseTreeVisitor, args ...interface{}) (result interface{}) {
+// 	return
+// }
 
 type BaseParseTreeVisitor struct{}
 
-func (*BaseParseTreeVisitor) VisitNext(node Tree, currentResult interface{}) bool {
-	return true
-}
-func (*BaseParseTreeVisitor) VisitRest(node RuleNode, currentResult interface{}) bool {
-	return true
-}
-func (*BaseParseTreeVisitor) VisitTerminal(node TerminalNode, args ...interface{}) (result interface{}) {
-	return
-}
-func (*BaseParseTreeVisitor) VisitErrorNode(node ErrorNode, args ...interface{}) (result interface{}) {
-	return
-}
-func (*BaseParseTreeVisitor) AggregateResult(aggregate, nextResult interface{}) (result interface{}) {
-	return nextResult
-}
-func (*BaseParseTreeVisitor) VisitChildren(node RuleNode, delegate ParseTreeVisitor, args ...interface{}) (result interface{}) {
+func (*BaseParseTreeVisitor) VisitTerminal(node TerminalNode) {}
+func (*BaseParseTreeVisitor) VisitErrorNode(node ErrorNode)   {}
+
+func (*BaseParseTreeVisitor) VisitChildren(node RuleNode, delegate ParseTreeVisitor, args ...interface{}) interface{} {
+	next, isNextCk := delegate.(VisitNextCheck)
+	rest, isRestCk := delegate.(VisitRestCheck)
+	entryV, isEnterV := delegate.(EnterEveryRuleVisitor)
+	exitV, isExitEV := delegate.(ExitEveryRuleVisitor)
+	aggre, isAggre := delegate.(AggregateResultVisitor)
+	var result interface{}
 	for _, child := range node.GetChildren() {
-		if !delegate.VisitNext(child, result) {
+		if isNextCk && !next.VisitNext(child, result) {
 			continue
 		}
 		switch child := child.(type) {
 		case TerminalNode:
-			r := delegate.VisitTerminal(child, args)
-			result = delegate.AggregateResult(result, r)
+			delegate.VisitTerminal(child)
 		case ErrorNode:
-			r := delegate.VisitErrorNode(child, args)
-			result = delegate.AggregateResult(result, r)
+			delegate.VisitErrorNode(child)
 		case RuleNode:
-			if !delegate.VisitRest(child, result) {
+			if isRestCk && !rest.VisitRest(child, result) {
 				break
 			}
-			r := child.Visit(delegate, args)
-			result = delegate.AggregateResult(result, r)
+			if isEnterV {
+				entryV.EnterEveryRule(child)
+			}
+			r := child.Visit(delegate, args...)
+			if isExitEV {
+				exitV.ExitEveryRule(child)
+			}
+			if isAggre {
+				result = aggre.AggregateResult(result, r)
+			} else {
+				result = r
+			}
 		default:
 			// can this happen??
 		}
 	}
-	return
+	return result
 }
 
 type ParseTreeListener interface {
@@ -135,6 +187,10 @@ func NewTerminalNodeImpl(symbol Token) *TerminalNodeImpl {
 	tn.symbol = symbol
 
 	return tn
+}
+
+func (t *TerminalNodeImpl) VisitFunc(nv NodeVisitor, x ParserTreeVisitorHandlers, args ...interface{}) interface{} {
+	return nil
 }
 
 func (t *TerminalNodeImpl) GetChild(i int) Tree {
@@ -178,7 +234,8 @@ func (t *TerminalNodeImpl) GetChildCount() int {
 }
 
 func (t *TerminalNodeImpl) Visit(v ParseTreeVisitor, args ...interface{}) interface{} {
-	return v.VisitTerminal(t, args)
+	v.VisitTerminal(t)
+	return nil
 }
 
 func (t *TerminalNodeImpl) GetText() string {
@@ -218,7 +275,8 @@ func NewErrorNodeImpl(token Token) *ErrorNodeImpl {
 func (e *ErrorNodeImpl) errorNode() {}
 
 func (e *ErrorNodeImpl) Visit(v ParseTreeVisitor, args ...interface{}) interface{} {
-	return v.VisitErrorNode(e, args)
+	v.VisitErrorNode(e)
+	return nil
 }
 
 type ParseTreeWalker struct {
